@@ -367,7 +367,7 @@ def test_t1_19_hsm_error(ctx: TestContext):
         assert "'10'" in out
         assert "Source key parity error" in out or "Parity" in out
         assert "DETAILED FIELD BREAKDOWN:" in out
-        assert "Error Details........... = [Source key parity error (ZMK, TPK, BDK)]" in out
+        assert "Error Details............ = [Source key parity error (ZMK, TPK, BDK)]" in out
     finally:
         stop_mock_server(srv_proc)
 

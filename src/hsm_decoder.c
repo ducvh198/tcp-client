@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdarg.h>
 
 typedef struct {
     const char code[3];
@@ -188,6 +189,20 @@ int hsm_parse_response(const uint8_t *buf, size_t len, size_t header_len, hsm_re
     return 0;
 }
 
+static void append_breakdown_line(char *buf, size_t buf_size, size_t *off, const char *fmt, ...) {
+    if (!buf || !off || *off >= buf_size) return;
+    va_list args;
+    va_start(args, fmt);
+    int written = vsnprintf(buf + *off, buf_size - *off, fmt, args);
+    va_end(args);
+    if (written > 0) {
+        *off += (size_t)written;
+        if (*off >= buf_size) {
+            *off = buf_size - 1;
+        }
+    }
+}
+
 void hsm_format_analysis(const hsm_response_t *resp, const uint8_t *raw_buf, size_t raw_len, char *out_str, size_t max_len) {
     if (!resp || !out_str || max_len == 0) {
         return;
@@ -226,26 +241,26 @@ void hsm_format_analysis(const hsm_response_t *resp, const uint8_t *raw_buf, siz
     size_t b_off = 0;
     breakdown[0] = '\0';
 
-    b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off, "DETAILED FIELD BREAKDOWN:\n");
+    append_breakdown_line(breakdown, sizeof(breakdown), &b_off, "DETAILED FIELD BREAKDOWN:\n");
 
     if (resp->has_tcp_len) {
-        b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
+        append_breakdown_line(breakdown, sizeof(breakdown), &b_off,
             "TCP/IP Header............ = [%04X] %u Bytes\n",
             (unsigned int)resp->tcp_len, (unsigned int)resp->tcp_len);
     }
 
     if (resp->header_len > 0) {
-        b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
+        append_breakdown_line(breakdown, sizeof(breakdown), &b_off,
             "Message Header........... = [%s]\n",
             resp->header);
     }
 
-    b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
+    append_breakdown_line(breakdown, sizeof(breakdown), &b_off,
         "Command Code............. = [%s] %s\n",
         resp->response_code[0] ? resp->response_code : "N/A",
         resp->response_name ? resp->response_name : "Unknown Response Code");
 
-    b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
+    append_breakdown_line(breakdown, sizeof(breakdown), &b_off,
         "Error Code............... = [%s] %s\n",
         resp->error_code[0] ? resp->error_code : "N/A",
         resp->error_description ? resp->error_description : "Unknown Error");
@@ -273,31 +288,31 @@ void hsm_format_analysis(const hsm_response_t *resp, const uint8_t *raw_buf, siz
                         kcv_len = rem - 17;
                     }
 
-                    b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
+                    append_breakdown_line(breakdown, sizeof(breakdown), &b_off,
                         "Key...................... = [%.*s]\n",
                         (int)key_len, (const char *)resp->payload);
 
                     if (kcv_len > 0) {
-                        b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
+                        append_breakdown_line(breakdown, sizeof(breakdown), &b_off,
                             "Key Check Value (KCV).... = [%.*s]\n",
                             (int)kcv_len, (const char *)(resp->payload + key_len));
                     }
                 } else {
-                    b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
+                    append_breakdown_line(breakdown, sizeof(breakdown), &b_off,
                         "Key Data................. = [%.*s]\n",
                         (int)resp->payload_len, (const char *)resp->payload);
                 }
             }
         } else {
             if (resp->payload && resp->payload_len > 0) {
-                b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
-                    "Data Payload............ = [%.*s]\n",
+                append_breakdown_line(breakdown, sizeof(breakdown), &b_off,
+                    "Data Payload............. = [%.*s]\n",
                     (int)resp->payload_len, (const char *)resp->payload);
             }
         }
     } else {
-        b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
-            "Error Details........... = [%s]\n",
+        append_breakdown_line(breakdown, sizeof(breakdown), &b_off,
+            "Error Details............ = [%s]\n",
             resp->error_description ? resp->error_description : "Unknown Error");
     }
 
