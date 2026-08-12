@@ -221,6 +221,86 @@ void hsm_format_analysis(const hsm_response_t *resp, const uint8_t *raw_buf, siz
         payload_ascii[ascii_len] = '\0';
     }
 
+    /* Format DETAILED FIELD BREAKDOWN section */
+    char breakdown[1024];
+    size_t b_off = 0;
+    breakdown[0] = '\0';
+
+    b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off, "DETAILED FIELD BREAKDOWN:\n");
+
+    if (resp->has_tcp_len) {
+        b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
+            "TCP/IP Header............ = [%04X] %u Bytes\n",
+            (unsigned int)resp->tcp_len, (unsigned int)resp->tcp_len);
+    }
+
+    if (resp->header_len > 0) {
+        b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
+            "Message Header........... = [%s]\n",
+            resp->header);
+    }
+
+    b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
+        "Command Code............. = [%s] %s\n",
+        resp->response_code[0] ? resp->response_code : "N/A",
+        resp->response_name ? resp->response_name : "Unknown Response Code");
+
+    b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
+        "Error Code............... = [%s] %s\n",
+        resp->error_code[0] ? resp->error_code : "N/A",
+        resp->error_description ? resp->error_description : "Unknown Error");
+
+    if (resp->is_success) {
+        if (resp->response_code[0] == 'A' && resp->response_code[1] == '1') {
+            if (resp->payload && resp->payload_len > 0) {
+                char scheme = (char)resp->payload[0];
+                if (scheme == 'U' || scheme == 'T' || scheme == 'X' || scheme == 'Z' || scheme == 'S' || scheme == 'Y') {
+                    size_t rem = resp->payload_len;
+                    size_t key_len = rem;
+                    size_t kcv_len = 0;
+
+                    if (rem >= 65) {
+                        key_len = 65;
+                        kcv_len = rem - 65;
+                    } else if (rem >= 49) {
+                        key_len = 49;
+                        kcv_len = rem - 49;
+                    } else if (rem >= 33) {
+                        key_len = 33;
+                        kcv_len = rem - 33;
+                    } else if (rem >= 17) {
+                        key_len = 17;
+                        kcv_len = rem - 17;
+                    }
+
+                    b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
+                        "Key...................... = [%.*s]\n",
+                        (int)key_len, (const char *)resp->payload);
+
+                    if (kcv_len > 0) {
+                        b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
+                            "Key Check Value (KCV).... = [%.*s]\n",
+                            (int)kcv_len, (const char *)(resp->payload + key_len));
+                    }
+                } else {
+                    b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
+                        "Key Data................. = [%.*s]\n",
+                        (int)resp->payload_len, (const char *)resp->payload);
+                }
+            }
+        } else {
+            if (resp->payload && resp->payload_len > 0) {
+                b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
+                    "Data Payload............ = [%.*s]\n",
+                    (int)resp->payload_len, (const char *)resp->payload);
+            }
+        }
+    } else {
+        b_off += snprintf(breakdown + b_off, sizeof(breakdown) - b_off,
+            "Error Details........... = [%s]\n",
+            resp->error_description ? resp->error_description : "Unknown Error");
+    }
+
     snprintf(out_str, max_len,
         "======================================================================\n"
         "             payShield 10K HSM RESPONSE DECODER ANALYSIS              \n"
@@ -229,10 +309,12 @@ void hsm_format_analysis(const hsm_response_t *resp, const uint8_t *raw_buf, siz
         "Raw Hex Packet    : %s\n"
         "----------------------------------------------------------------------\n"
         "TCP Length Header : %s\n"
-        "Message Header    : %s%s\n"
+        "Message Header    : %s\n"
         "Response Code     : '%s' -> [%s]\n"
         "Error Code        : '%s' -> [%s]\n"
         "                    Error Description: %s\n"
+        "----------------------------------------------------------------------\n"
+        "%s"
         "----------------------------------------------------------------------\n"
         "Response Payload  : %lu bytes %s\n"
         "%s%s%s%s%s"
@@ -241,12 +323,12 @@ void hsm_format_analysis(const hsm_response_t *resp, const uint8_t *raw_buf, siz
         hex_dump[0] ? hex_dump : "(None)",
         resp->has_tcp_len ? "2 Bytes (Binary Big-Endian)" : "None / Omitted",
         resp->header_len > 0 ? resp->header : "(None)",
-        resp->header_len > 0 ? "" : "",
         resp->response_code[0] ? resp->response_code : "N/A",
         resp->response_name ? resp->response_name : "Unknown Response Code",
         resp->error_code[0] ? resp->error_code : "N/A",
         resp->is_success ? "SUCCESS / OK" : "ERROR / FAILED",
         resp->error_description ? resp->error_description : "",
+        breakdown,
         (unsigned long)resp->payload_len,
         resp->is_success ? "" : "(Truncated by HSM due to error)",
         (resp->payload_len > 0) ? "Payload HEX       : " : "",
