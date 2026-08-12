@@ -269,15 +269,35 @@ void hsm_format_analysis(const hsm_response_t *resp, const uint8_t *raw_buf, siz
         if (resp->response_code[0] == 'A' && resp->response_code[1] == '1') {
             if (resp->payload && resp->payload_len > 0) {
                 char scheme = (char)resp->payload[0];
-                if (scheme == 'U' || scheme == 'T' || scheme == 'X' || scheme == 'Z' || scheme == 'S' || scheme == 'Y') {
+                if (scheme == 'S') {
+                    size_t block_len = 0;
+                    if (resp->payload_len >= 5) {
+                        char len_buf[5] = {0};
+                        memcpy(len_buf, resp->payload + 1, 4);
+                        block_len = (size_t)atoi(len_buf);
+                    }
+                    if (block_len == 0 || block_len > resp->payload_len) {
+                        block_len = resp->payload_len;
+                    }
+
+                    size_t key_len = block_len;
+                    size_t kcv_len = (resp->payload_len > key_len) ? (resp->payload_len - key_len) : 0;
+
+                    append_breakdown_line(breakdown, sizeof(breakdown), &b_off,
+                        "Key Block (TR-31)........ = [%.*s]\n",
+                        (int)key_len, (const char *)resp->payload);
+
+                    if (kcv_len > 0) {
+                        append_breakdown_line(breakdown, sizeof(breakdown), &b_off,
+                            "Key Check Value (KCV).... = [%.*s]\n",
+                            (int)kcv_len, (const char *)(resp->payload + key_len));
+                    }
+                } else if (scheme == 'U' || scheme == 'T' || scheme == 'X' || scheme == 'Z' || scheme == 'Y' || scheme == 'M') {
                     size_t rem = resp->payload_len;
                     size_t key_len = rem;
                     size_t kcv_len = 0;
 
-                    if (rem >= 65) {
-                        key_len = 65;
-                        kcv_len = rem - 65;
-                    } else if (rem >= 49) {
+                    if (rem >= 49) {
                         key_len = 49;
                         kcv_len = rem - 49;
                     } else if (rem >= 33) {
