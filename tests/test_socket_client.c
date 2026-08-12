@@ -27,6 +27,11 @@ void test_socket_invalid_fd_io(void) {
     char buf[16];
     ASSERT_EQ_INT(SOCKET_ERR_IO, socket_write_all(-1, "test", 4, 1000));
     ASSERT_EQ_INT(SOCKET_ERR_IO, socket_read(-1, buf, sizeof(buf), 1000));
+    ASSERT_EQ_INT(SOCKET_ERR_IO, socket_read_exact(-1, buf, sizeof(buf), 1000));
+    ASSERT_EQ_INT(SOCKET_ERR_IO, socket_read_framed(-1, buf, sizeof(buf), 1000));
+    ASSERT_EQ_INT(SOCKET_ERR_IO, socket_read_exact(1, NULL, 10, 1000));
+    ASSERT_EQ_INT(SOCKET_ERR_IO, socket_read_framed(1, NULL, 10, 1000));
+    ASSERT_EQ_INT(SOCKET_ERR_IO, socket_read_framed(1, buf, 1, 1000));
 }
 
 void run_socket_client_tests(void) {

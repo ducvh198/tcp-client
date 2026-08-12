@@ -829,6 +829,19 @@ def test_t5_14(ctx: TestContext):
         stop_mock_server(srv_proc)
 
 
+@register_test(5, "T5_15_TCP_SEGMENTATION", "TCP Segmentation 272-byte packet complete reception without 17-byte loss", ["FEAT-008"])
+def test_t5_15(ctx: TestContext):
+    srv_proc, port = start_mock_server("segmented")
+    try:
+        code, out, err = run_client(ctx, ["-h", "127.0.0.1", "-p", str(port), "-D"], input_data=b"")
+        assert code == 0, f"Expected exit code 0, got {code}"
+        assert "Raw Packet Length : 272 bytes" in out, f"Expected 272 bytes packet, got: {out}"
+        assert "Key Check Value (KCV).... = [PPPPPPKCV123]" in out, f"Expected KCV in output, got: {out}"
+        assert "Key Block (TR-31)" in out, f"Expected TR-31 block in output, got: {out}"
+    finally:
+        stop_mock_server(srv_proc)
+
+
 # ============================================================================
 # MAIN RUNNER LOGIC
 # ============================================================================

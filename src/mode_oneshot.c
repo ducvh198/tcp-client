@@ -186,6 +186,13 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
                     if (hsm_accum_len + (size_t)nread < sizeof(hsm_accum_buf)) {
                         memcpy(hsm_accum_buf + hsm_accum_len, recv_buf, (size_t)nread);
                         hsm_accum_len += (size_t)nread;
+                        if (hsm_accum_len >= 2) {
+                            uint16_t expected_payload = (uint16_t)(((uint8_t)hsm_accum_buf[0] << 8) | (uint8_t)hsm_accum_buf[1]);
+                            size_t expected_total = 2 + (size_t)expected_payload;
+                            if (hsm_accum_len >= expected_total) {
+                                socket_eof = true;
+                            }
+                        }
                     }
                 } else if (config->hex_out) {
                     char hex_out_buf[ONESHOT_BUF_SIZE * 3 + 2];
@@ -262,6 +269,13 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
                     if (hsm_accum_len + (size_t)nread < sizeof(hsm_accum_buf)) {
                         memcpy(hsm_accum_buf + hsm_accum_len, recv_buf, (size_t)nread);
                         hsm_accum_len += (size_t)nread;
+                        if (hsm_accum_len >= 2) {
+                            uint16_t expected_payload = (uint16_t)(((uint8_t)hsm_accum_buf[0] << 8) | (uint8_t)hsm_accum_buf[1]);
+                            size_t expected_total = 2 + (size_t)expected_payload;
+                            if (hsm_accum_len >= expected_total) {
+                                socket_eof = true;
+                            }
+                        }
                     }
                 } else if (config->hex_out) {
                     char hex_out_buf[ONESHOT_BUF_SIZE * 3 + 2];

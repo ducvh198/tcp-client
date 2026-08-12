@@ -135,6 +135,45 @@ def handle_client_http(conn: socket.socket, addr, quiet: bool):
         log_msg(quiet, f"Closed HTTP connection from {addr}")
 
 
+def handle_client_segmented(conn: socket.socket, addr, quiet: bool):
+    """Simulates TCP Segmentation by splitting a 272-byte payload into 255-byte and 17-byte chunks with delay."""
+    log_msg(quiet, f"Connected (segmented) from {addr}")
+    try:
+        conn.settimeout(2.0)
+        try:
+            _req = conn.recv(4096)
+        except socket.timeout:
+            pass
+
+        # Build 272-byte packet: 2-byte header (270 bytes payload) + A1 (resp) + 00 (err) + TR-31 payload + KCV
+        payload_len = 270
+        header = bytes([ (payload_len >> 8) & 0xFF, payload_len & 0xFF ]) # 2 bytes
+        resp_code = b"A1" # 2 bytes
+        err_code = b"00" # 2 bytes
+        # TR-31 payload (260 bytes: 'S' + length + key block) + KCV (6 bytes: "123456")
+        tr31_data = (b"S0254" + b"K" * 249) # 254 bytes
+        kcv = b"KCV123" # 6 bytes
+        full_packet = header + resp_code + err_code + tr31_data + kcv # Total: 2 + 2 + 2 + 254 + 6 = 266 -> let's pad payload to 270 bytes
+        pad = b"P" * (272 - len(full_packet))
+        full_packet = header + resp_code + err_code + tr31_data + pad + kcv # Exactly 272 bytes
+
+        # Segment 1: first 255 bytes
+        seg1 = full_packet[:255]
+        # Segment 2: remaining 17 bytes (272 - 255 = 17 bytes)
+        seg2 = full_packet[255:]
+
+        log_msg(quiet, f"Sending Segment 1 ({len(seg1)} bytes)...")
+        conn.sendall(seg1)
+        time.sleep(0.1) # 100ms TCP segmentation delay
+        log_msg(quiet, f"Sending Segment 2 ({len(seg2)} bytes)...")
+        conn.sendall(seg2)
+    except (ConnectionResetError, BrokenPipeError):
+        log_msg(quiet, "Client disconnected abruptly in segmented mode")
+    finally:
+        conn.close()
+        log_msg(quiet, f"Closed segmented connection from {addr}")
+
+
 def run_mock_server(host: str, port: int, mode: str, delay_ms: int, disconnect_after: int,
                     quiet: bool, port_file: str = None, once: bool = False):
     """Main server loop binding host/port and servicing connections based on mode."""
@@ -165,6 +204,7 @@ def run_mock_server(host: str, port: int, mode: str, delay_ms: int, disconnect_a
         'disconnect': lambda conn, addr: handle_client_disconnect(conn, addr, disconnect_after, quiet),
         'multiline': lambda conn, addr: handle_client_multiline(conn, addr, quiet),
         'http': lambda conn, addr: handle_client_http(conn, addr, quiet),
+        'segmented': lambda conn, addr: handle_client_segmented(conn, addr, quiet),
     }
 
     handler = handler_map.get(mode, handler_map['echo'])
@@ -200,7 +240,7 @@ def main():
     parser = argparse.ArgumentParser(description="Mock TCP Server for TCP Client CLI testing")
     parser.add_argument("--host", default="127.0.0.1", help="Host IP to bind (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=0, help="Port to listen on (0 for dynamic free port)")
-    parser.add_argument("--mode", choices=["echo", "delayed", "disconnect", "multiline", "http"],
+    parser.add_argument("--mode", choices=["echo", "delayed", "disconnect", "multiline", "http", "segmented"],
                         default="echo", help="Server operating mode (default: echo)")
     parser.add_argument("--delay-ms", type=int, default=2000, help="Delay in milliseconds for delayed mode")
     parser.add_argument("--disconnect-after", type=int, default=0,

@@ -51,6 +51,32 @@ ssize_t socket_write_all(int sockfd, const void *buf, size_t len, int timeout_ms
 ssize_t socket_read(int sockfd, void *buf, size_t len, int timeout_ms);
 
 /**
+ * Reads exactly len bytes from socket in a loop with timeout enforcement.
+ * Protects against TCP segmentation truncating messages.
+ *
+ * @param sockfd     Connected socket descriptor.
+ * @param buf        Pointer to receive buffer (must have capacity >= len).
+ * @param len        Exact number of bytes required.
+ * @param timeout_ms Timeout in milliseconds per read operation.
+ * @return Total bytes read (== len) on success, 0 on clean server EOF before len bytes,
+ *         or SOCKET_ERR_TIMEOUT (-4) / SOCKET_ERR_IO (-5).
+ */
+ssize_t socket_read_exact(int sockfd, void *buf, size_t len, int timeout_ms);
+
+/**
+ * Reads a 2-byte Big-Endian TCP length-prefixed frame from socket with timeout enforcement.
+ * First reads the 2-byte header L = (buf[0]<<8)|buf[1], then reads exactly L payload bytes into buf + 2.
+ *
+ * @param sockfd     Connected socket descriptor.
+ * @param buf        Pointer to receive buffer (must have capacity >= 2 + L).
+ * @param max_len    Maximum capacity of buf.
+ * @param timeout_ms Timeout in milliseconds per read operation.
+ * @return Total frame length read (2 + L) on success, 0 on clean server EOF,
+ *         or SOCKET_ERR_TIMEOUT (-4) / SOCKET_ERR_IO (-5).
+ */
+ssize_t socket_read_framed(int sockfd, void *buf, size_t max_len, int timeout_ms);
+
+/**
  * Safely closes an open socket file descriptor.
  *
  * @param sockfd Socket file descriptor.

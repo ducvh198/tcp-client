@@ -192,6 +192,60 @@ ssize_t socket_read(int sockfd, void *buf, size_t len, int timeout_ms) {
     }
 }
 
+ssize_t socket_read_exact(int sockfd, void *buf, size_t len, int timeout_ms) {
+    if (sockfd < 0 || !buf) {
+        return SOCKET_ERR_IO;
+    }
+    char *ptr = (char *)buf;
+    size_t accumulated = 0;
+
+    while (accumulated < len) {
+        ssize_t n = socket_read(sockfd, ptr + accumulated, len - accumulated, timeout_ms);
+        if (n > 0) {
+            accumulated += (size_t)n;
+        } else if (n == 0) {
+            return (ssize_t)accumulated; /* Clean EOF before full len */
+        } else {
+            return n; /* SOCKET_ERR_TIMEOUT or SOCKET_ERR_IO */
+        }
+    }
+    return (ssize_t)accumulated;
+}
+
+ssize_t socket_read_framed(int sockfd, void *buf, size_t max_len, int timeout_ms) {
+    if (sockfd < 0 || !buf || max_len < 2) {
+        return SOCKET_ERR_IO;
+    }
+    uint8_t *u8_buf = (uint8_t *)buf;
+
+    ssize_t header_rc = socket_read_exact(sockfd, u8_buf, 2, timeout_ms);
+    if (header_rc <= 0) {
+        return header_rc;
+    }
+    if (header_rc < 2) {
+        return SOCKET_ERR_IO;
+    }
+
+    uint16_t payload_len = (uint16_t)((u8_buf[0] << 8) | u8_buf[1]);
+    size_t total_frame_len = 2 + (size_t)payload_len;
+
+    if (total_frame_len > max_len) {
+        return SOCKET_ERR_IO;
+    }
+
+    if (payload_len > 0) {
+        ssize_t payload_rc = socket_read_exact(sockfd, u8_buf + 2, payload_len, timeout_ms);
+        if (payload_rc < 0) {
+            return payload_rc;
+        }
+        if ((size_t)payload_rc < payload_len) {
+            return SOCKET_ERR_IO;
+        }
+    }
+
+    return (ssize_t)total_frame_len;
+}
+
 void socket_close(int sockfd) {
     if (sockfd >= 0) {
         platform_socket_close(sockfd);
