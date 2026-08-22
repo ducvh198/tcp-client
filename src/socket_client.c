@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 int socket_connect(const char *host, int port, int timeout_ms, bool verbose) {
     if (!host || host[0] == '\0' || port < 1 || port > 65535) {
@@ -238,7 +239,7 @@ ssize_t socket_read_framed(int sockfd, void *buf, size_t max_len, int timeout_ms
         if (payload_rc < 0) {
             return payload_rc;
         }
-        if ((size_t)payload_rc < payload_len) {
+        if ((size_t)payload_rc < (size_t)payload_len) {
             return SOCKET_ERR_IO;
         }
     }

@@ -2,6 +2,7 @@
 #define SOCKET_CLIENT_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include <sys/types.h>
 #include <stdbool.h>
 
