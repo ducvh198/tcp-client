@@ -86,8 +86,9 @@ sudo make uninstall
 | `-h` | `--host <host>` | Target hostname or IP address (IPv4/IPv6) | Required |
 | `-p` | `--port <port>` | Target TCP port number (1 to 65535) | Required |
 | `-t` | `--timeout <ms>` | Connection and read/write timeout in milliseconds | `5000` (5 seconds) |
-| `-a` | `--ascii <str>` | Directly send raw ASCII payload string (e.g. `"NC0000"`) | N/A |
+| `-a` | `--ascii <str>` | Directly send raw ASCII payload string with escape sequence support (`\xHH`, `\r`, `\n`, `\t`, `\0`, `\\`) | N/A |
 | `-x` | `--hex <hex_str>`| Directly send raw HEX payload string (e.g. `"00 06 30 30 30 30"`) | N/A |
+| `-T` | `--term <hex>` | 1-byte HEX termination character: appends on send and stops reading on receive delimiter (e.g. `"19"` or `"0x19"`) | Disabled |
 | `-X` | `--hex-out` | Format server response as HEX string on `STDOUT` | Disabled |
 | `-L` | `--add-tcp-len` | Prepend 2-byte Big-Endian TCP length header to ASCII/HEX payload | Disabled |
 | `-D` | `--decode-hsm` | Enable payShield 10K HSM Response Decoder analysis report | Disabled |
@@ -136,6 +137,24 @@ sudo make uninstall
 3. **Send HSM Key Generation Command & View Raw HEX Output**:
    ```bash
    ./tcp-client 10.0.0.50 9999 -x "00 0E 41 41 30 30 30 30 31 32 33 34 35 36 37 38" --hex-out -v
+   ```
+
+### ASCII Mode & Special Characters / Termination
+
+1. **Send ASCII Payload with Hex Escape Sequence (`\x19`, `\r\n`)**:
+   ```bash
+   ./tcp-client 127.0.0.1 8000 -a "NC0000\x19"
+   ```
+
+2. **Send ASCII Payload and Append Termination Character (`--term 19`)**:
+   ```bash
+   ./tcp-client 127.0.0.1 8000 -a "NC0000" --term 19
+   ```
+
+3. **Stop Receiving Immediately upon Delimiter (`--term 19`)**:
+   ```bash
+   # Client sends request and stops reading response as soon as 0x19 is received:
+   ./tcp-client 127.0.0.1 8000 -a "GET_DATA" -T 0x19
    ```
 
 ### One-Shot / Pipe Mode Examples

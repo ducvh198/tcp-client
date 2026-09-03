@@ -94,3 +94,106 @@ int bytes_to_hex(const uint8_t *in_buf, size_t in_len, char *out_str, size_t max
     out_str[pos] = '\0';
     return 0;
 }
+
+int parse_hex_byte(const char *str, uint8_t *out_byte) {
+    if (!str || !out_byte) {
+        return -1;
+    }
+
+    while (*str != '\0' && isspace((unsigned char)*str)) {
+        str++;
+    }
+
+    if (str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
+        str += 2;
+    }
+
+    if (*str == '\0') {
+        return -1;
+    }
+
+    int digits[2];
+    int num_digits = 0;
+
+    while (*str != '\0' && !isspace((unsigned char)*str)) {
+        if (num_digits >= 2) {
+            return -1; /* Exceeds 1 byte */
+        }
+        int val = hex_char_to_int(*str);
+        if (val < 0) {
+            return -1; /* Invalid hex character */
+        }
+        digits[num_digits++] = val;
+        str++;
+    }
+
+    /* Verify remainder is only whitespace */
+    while (*str != '\0') {
+        if (!isspace((unsigned char)*str)) {
+            return -1;
+        }
+        str++;
+    }
+
+    if (num_digits == 1) {
+        *out_byte = (uint8_t)digits[0];
+    } else if (num_digits == 2) {
+        *out_byte = (uint8_t)((digits[0] << 4) | digits[1]);
+    } else {
+        return -1;
+    }
+
+    return 0;
+}
+
+int unescape_string(const char *src, uint8_t *out_buf, size_t max_buf_size, size_t *out_len) {
+    if (!src || !out_buf || !out_len) {
+        return -1;
+    }
+
+    size_t count = 0;
+    for (size_t i = 0; src[i] != '\0'; i++) {
+        if (count >= max_buf_size) {
+            return -2; /* Buffer overflow */
+        }
+
+        if (src[i] == '\\' && src[i + 1] != '\0') {
+            char next = src[i + 1];
+            if (next == 'x' || next == 'X') {
+                if (src[i + 2] != '\0' && src[i + 3] != '\0') {
+                    int h1 = hex_char_to_int(src[i + 2]);
+                    int h2 = hex_char_to_int(src[i + 3]);
+                    if (h1 >= 0 && h2 >= 0) {
+                        out_buf[count++] = (uint8_t)((h1 << 4) | h2);
+                        i += 3;
+                        continue;
+                    }
+                }
+                return -1; /* Malformed \xHH sequence */
+            } else if (next == 'r') {
+                out_buf[count++] = '\r';
+                i++;
+            } else if (next == 'n') {
+                out_buf[count++] = '\n';
+                i++;
+            } else if (next == 't') {
+                out_buf[count++] = '\t';
+                i++;
+            } else if (next == '0') {
+                out_buf[count++] = '\0';
+                i++;
+            } else if (next == '\\') {
+                out_buf[count++] = '\\';
+                i++;
+            } else {
+                out_buf[count++] = (uint8_t)next;
+                i++;
+            }
+        } else {
+            out_buf[count++] = (uint8_t)src[i];
+        }
+    }
+
+    *out_len = count;
+    return 0;
+}

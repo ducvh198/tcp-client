@@ -85,6 +85,11 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
             fprintf(stderr, "Error: Invalid HEX string format '%s'. Ensure even length and valid hex characters.\n", config->hex_payload);
             return 1;
         }
+        if (config->has_term_char) {
+            if (hex_len < sizeof(hex_bytes)) {
+                hex_bytes[hex_len++] = config->term_char;
+            }
+        }
         if (config->add_tcp_len) {
             send_buf[0] = (char)((hex_len >> 8) & 0xFF);
             send_buf[1] = (char)(hex_len & 0xFF);
@@ -101,14 +106,24 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
                     (unsigned long)send_buf_len, config->add_tcp_len ? "yes" : "no");
         }
     } else if (config->is_ascii) {
-        size_t ascii_len = strlen(config->ascii_payload);
+        uint8_t ascii_bytes[ONESHOT_BUF_SIZE];
+        size_t ascii_len = config->ascii_payload_len;
+        if (ascii_len > sizeof(ascii_bytes)) {
+            ascii_len = sizeof(ascii_bytes);
+        }
+        memcpy(ascii_bytes, config->ascii_payload, ascii_len);
+        if (config->has_term_char) {
+            if (ascii_len < sizeof(ascii_bytes)) {
+                ascii_bytes[ascii_len++] = config->term_char;
+            }
+        }
         if (config->add_tcp_len) {
             send_buf[0] = (char)((ascii_len >> 8) & 0xFF);
             send_buf[1] = (char)(ascii_len & 0xFF);
-            memcpy(send_buf + 2, config->ascii_payload, ascii_len);
+            memcpy(send_buf + 2, ascii_bytes, ascii_len);
             send_buf_len = ascii_len + 2;
         } else {
-            memcpy(send_buf, config->ascii_payload, ascii_len);
+            memcpy(send_buf, ascii_bytes, ascii_len);
             send_buf_len = ascii_len;
         }
         send_buf_pos = 0;
@@ -182,10 +197,22 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
         if (sock_idx >= 0 && (fds[sock_idx].revents & (POLLIN | POLLHUP | POLLERR))) {
             ssize_t nread = recv(sockfd, recv_buf, sizeof(recv_buf), 0);
             if (nread > 0) {
+                size_t to_process = (size_t)nread;
+                bool term_found = false;
+                if (config->has_term_char) {
+                    for (size_t i = 0; i < (size_t)nread; i++) {
+                        if ((uint8_t)recv_buf[i] == config->term_char) {
+                            to_process = i + 1;
+                            term_found = true;
+                            break;
+                        }
+                    }
+                }
+
                 if (config->decode_hsm) {
-                    if (hsm_accum_len + (size_t)nread < sizeof(hsm_accum_buf)) {
-                        memcpy(hsm_accum_buf + hsm_accum_len, recv_buf, (size_t)nread);
-                        hsm_accum_len += (size_t)nread;
+                    if (hsm_accum_len + to_process < sizeof(hsm_accum_buf)) {
+                        memcpy(hsm_accum_buf + hsm_accum_len, recv_buf, to_process);
+                        hsm_accum_len += to_process;
                         if (hsm_accum_len >= 2) {
                             uint16_t expected_payload = (uint16_t)(((uint8_t)hsm_accum_buf[0] << 8) | (uint8_t)hsm_accum_buf[1]);
                             size_t expected_total = 2 + (size_t)expected_payload;
@@ -196,7 +223,7 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
                     }
                 } else if (config->hex_out) {
                     char hex_out_buf[ONESHOT_BUF_SIZE * 3 + 2];
-                    if (bytes_to_hex((const uint8_t *)recv_buf, (size_t)nread, hex_out_buf, sizeof(hex_out_buf), true, true) == 0) {
+                    if (bytes_to_hex((const uint8_t *)recv_buf, to_process, hex_out_buf, sizeof(hex_out_buf), true, true) == 0) {
                         size_t hex_len = strlen(hex_out_buf);
                         hex_out_buf[hex_len] = '\n';
                         hex_out_buf[hex_len + 1] = '\0';
@@ -205,9 +232,13 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
                         }
                     }
                 } else {
-                    if (write_all_fd(STDOUT_FILENO, recv_buf, (size_t)nread) < 0) {
+                    if (write_all_fd(STDOUT_FILENO, recv_buf, to_process) < 0) {
                         return 5;
                     }
+                }
+
+                if (term_found) {
+                    socket_eof = true;
                 }
             } else if (nread == 0) {
                 socket_eof = true;
@@ -265,10 +296,22 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
         if (spfd.revents & (POLLIN | POLLHUP | POLLERR)) {
             ssize_t nread = recv(sockfd, recv_buf, sizeof(recv_buf), 0);
             if (nread > 0) {
+                size_t to_process = (size_t)nread;
+                bool term_found = false;
+                if (config->has_term_char) {
+                    for (size_t i = 0; i < (size_t)nread; i++) {
+                        if ((uint8_t)recv_buf[i] == config->term_char) {
+                            to_process = i + 1;
+                            term_found = true;
+                            break;
+                        }
+                    }
+                }
+
                 if (config->decode_hsm) {
-                    if (hsm_accum_len + (size_t)nread < sizeof(hsm_accum_buf)) {
-                        memcpy(hsm_accum_buf + hsm_accum_len, recv_buf, (size_t)nread);
-                        hsm_accum_len += (size_t)nread;
+                    if (hsm_accum_len + to_process < sizeof(hsm_accum_buf)) {
+                        memcpy(hsm_accum_buf + hsm_accum_len, recv_buf, to_process);
+                        hsm_accum_len += to_process;
                         if (hsm_accum_len >= 2) {
                             uint16_t expected_payload = (uint16_t)(((uint8_t)hsm_accum_buf[0] << 8) | (uint8_t)hsm_accum_buf[1]);
                             size_t expected_total = 2 + (size_t)expected_payload;
@@ -279,14 +322,18 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
                     }
                 } else if (config->hex_out) {
                     char hex_out_buf[ONESHOT_BUF_SIZE * 3 + 2];
-                    if (bytes_to_hex((const uint8_t *)recv_buf, (size_t)nread, hex_out_buf, sizeof(hex_out_buf), true, true) == 0) {
+                    if (bytes_to_hex((const uint8_t *)recv_buf, to_process, hex_out_buf, sizeof(hex_out_buf), true, true) == 0) {
                         size_t hex_len = strlen(hex_out_buf);
                         hex_out_buf[hex_len] = '\n';
                         hex_out_buf[hex_len + 1] = '\0';
                         write_all_fd(STDOUT_FILENO, hex_out_buf, hex_len + 1);
                     }
                 } else {
-                    write_all_fd(STDOUT_FILENO, recv_buf, (size_t)nread);
+                    write_all_fd(STDOUT_FILENO, recv_buf, to_process);
+                }
+
+                if (term_found) {
+                    socket_eof = true;
                 }
             } else if (nread == 0) {
                 socket_eof = true;

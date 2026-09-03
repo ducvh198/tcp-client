@@ -39,8 +39,7 @@ void print_usage(const char *prog_name) {
     printf("  -t, --timeout <ms>      Connection/IO timeout in milliseconds (default: 5000)\n");
     printf("  -x, --hex <hex_string>  Send raw HEX payload string directly (e.g. \"00 06 30 30 30 30\")\n");
     printf("  -X, --hex-out           Display server response formatted in HEX\n");
-    printf("  -a, --ascii <str>       Send raw ASCII payload string directly (e.g. \"NC0000\")\n");
-    printf("  -L, --add-tcp-len       Prepend 2-byte Big-Endian TCP length header to ASCII/HEX payload\n");
+    printf("  -a, --ascii <str>       Send raw ASCII payload string directly with escape support (e.g. \"NC0000\\x19\")\n");
     printf("  -D, --decode-hsm        Enable payShield 10K HSM Response Decoder analysis\n");
     printf("      --hsm-header-len <n> Set HSM Message Header length in bytes (default: 0 or 4)\n");
     printf("  -i, --interactive       Force interactive mode\n");
@@ -72,7 +71,7 @@ int parse_cli_args(int argc, char *argv[], cli_config_t *config) {
         {"hex",            required_argument, NULL, 'x'},
         {"hex-out",        no_argument,       NULL, 'X'},
         {"ascii",          required_argument, NULL, 'a'},
-        {"add-tcp-len",    no_argument,       NULL, 'L'},
+        {"term",           required_argument, NULL, 'T'},
         {"decode-hsm",     no_argument,       NULL, 'D'},
         {"hsm-header-len", required_argument, NULL, 1000},
         {"interactive",    no_argument,       NULL, 'i'},
@@ -83,9 +82,8 @@ int parse_cli_args(int argc, char *argv[], cli_config_t *config) {
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "h:p:t:x:Xa:LDivHV", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "h:p:t:x:Xa:T:LDivHV", long_options, NULL)) != -1) {
         switch (opt) {
-        case 'h':
             if (strlen(optarg) >= sizeof(config->host)) {
                 fprintf(stderr, "Error: Host string too long (max %lu characters)\n", (unsigned long)(sizeof(config->host) - 1));
                 return 1;
@@ -137,21 +135,17 @@ int parse_cli_args(int argc, char *argv[], cli_config_t *config) {
             break;
 
         case 'a':
-            if (strlen(optarg) >= sizeof(config->ascii_payload)) {
-                fprintf(stderr, "Error: ASCII payload too long (max %lu characters)\n", (unsigned long)(sizeof(config->ascii_payload) - 1));
+            if (unescape_string(optarg, config->ascii_payload, sizeof(config->ascii_payload), &config->ascii_payload_len) != 0) {
+                fprintf(stderr, "Error: Invalid escape sequence in ASCII payload '%s'. Ensure \\x is followed by two valid hex characters.\n", optarg);
                 return 1;
             }
-            strncpy(config->ascii_payload, optarg, sizeof(config->ascii_payload) - 1);
-            config->ascii_payload[sizeof(config->ascii_payload) - 1] = '\0';
-            config->is_ascii = true;
-            break;
 
-        case 'L':
-            config->add_tcp_len = true;
-            break;
-
-        case 'D':
-            config->decode_hsm = true;
+        case 'T':
+            if (parse_hex_byte(optarg, &config->term_char) != 0) {
+                fprintf(stderr, "Error: Invalid termination character '%s'. Must be a 1-byte HEX value (e.g. '19' or '0x19').\n", optarg);
+                return 1;
+            }
+            config->has_term_char = true;
             break;
 
         case 1000: { /* --hsm-header-len */

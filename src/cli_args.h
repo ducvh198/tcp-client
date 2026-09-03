@@ -2,6 +2,8 @@
 #define CLI_ARGS_H
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 typedef enum {
     MODE_AUTO = 0,
@@ -21,11 +23,14 @@ typedef struct {
     char hex_payload[65536];
     bool is_hex;
     bool hex_out;
-    char ascii_payload[65536];
+    uint8_t ascii_payload[65536];
+    size_t ascii_payload_len;
     bool is_ascii;
     bool add_tcp_len;
     bool decode_hsm;
     int hsm_header_len;
+    bool has_term_char;
+    uint8_t term_char;
 } cli_config_t;
 
 int parse_cli_args(int argc, char *argv[], cli_config_t *config);

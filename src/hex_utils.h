@@ -30,4 +30,24 @@ int hex_to_bytes(const char *hex_str, uint8_t *out_buf, size_t max_buf_size, siz
  */
 int bytes_to_hex(const uint8_t *in_buf, size_t in_len, char *out_str, size_t max_out_size, bool uppercase, bool add_spaces);
 
+/**
+ * Parses a single-byte hex string (e.g. "19", "0x19", "0X19", "F") into a single byte.
+ *
+ * @param str Input null-terminated hex string.
+ * @param out_byte Pointer to store resulting byte value.
+ * @return 0 on success, -1 on invalid hex character or invalid length.
+ */
+int parse_hex_byte(const char *str, uint8_t *out_byte);
+
+/**
+ * Decodes backslash escape sequences in a string (\xHH, \r, \n, \t, \0, \\).
+ *
+ * @param src Input string with potential escape sequences.
+ * @param out_buf Buffer to store decoded bytes.
+ * @param max_buf_size Maximum byte capacity of out_buf.
+ * @param out_len Pointer to store resulting decoded byte length.
+ * @return 0 on success, -1 on invalid escape syntax, -2 on buffer overflow.
+ */
+int unescape_string(const char *src, uint8_t *out_buf, size_t max_buf_size, size_t *out_len);
+
 #endif /* HEX_UTILS_H */

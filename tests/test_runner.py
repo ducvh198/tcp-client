@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -394,6 +395,73 @@ def test_t1_21_ascii_tcp_len(ctx: TestContext):
         assert out.endswith("NC0000")
     finally:
         stop_mock_server(srv_proc)
+
+
+@register_test(1, "T1_22_ASCII_ESCAPE", "Direct ASCII payload with escape sequences (-a)", ["FEAT-019"])
+def test_t1_22_ascii_escape(ctx: TestContext):
+    srv_proc, port = start_mock_server("echo")
+    try:
+        code, out, err = run_client(ctx, ["127.0.0.1", str(port), "-a", r"NC0000\x19\r\n"])
+        assert code == 0, f"Expected exit code 0, got {code}. Stderr: {err}"
+        assert out == "NC0000\x19\r\n", f"Expected 'NC0000\\x19\\r\\n', got {repr(out)}"
+    finally:
+        stop_mock_server(srv_proc)
+
+
+@register_test(1, "T1_23_TERM_FLAG_SEND", "Termination character flag appends byte on send (-T / --term)", ["FEAT-020"])
+def test_t1_23_term_flag_send(ctx: TestContext):
+    srv_proc, port = start_mock_server("echo")
+    try:
+        code, out, err = run_client(ctx, ["127.0.0.1", str(port), "-a", "TEST", "--term", "19"])
+        assert code == 0, f"Expected exit code 0, got {code}. Stderr: {err}"
+        assert out == "TEST\x19", f"Expected 'TEST\\x19', got {repr(out)}"
+    finally:
+        stop_mock_server(srv_proc)
+
+
+@register_test(1, "T1_24_TERM_FLAG_RECV", "Termination character flag stops read on delimiter without waiting for EOF", ["FEAT-020"])
+def test_t1_24_term_flag_recv(ctx: TestContext):
+    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_sock.bind(('127.0.0.1', 0))
+    server_sock.listen(1)
+    port = server_sock.getsockname()[1]
+
+    def server_thread_func():
+        try:
+            conn, _ = server_sock.accept()
+            _ = conn.recv(1024)
+            conn.sendall(b"REPLY_DATA\x19MORE_UNUSED_DATA")
+            time.sleep(3.0)
+            conn.close()
+        except Exception:
+            pass
+        finally:
+            server_sock.close()
+
+    t = threading.Thread(target=server_thread_func, daemon=True)
+    t.start()
+
+    try:
+        t0 = time.time()
+        code, out, err = run_client(ctx, ["127.0.0.1", str(port), "-a", "HELLO", "-T", "0x19", "-t", "4000"])
+        elapsed = time.time() - t0
+        assert code == 0, f"Expected exit code 0, got {code}. Stderr: {err}"
+        assert "REPLY_DATA\x19" in out, f"Expected 'REPLY_DATA\\x19' in out, got {repr(out)}"
+        assert elapsed < 2.0, f"Expected to stop immediately on term char, took {elapsed:.2f}s"
+    finally:
+        try:
+            server_sock.close()
+        except Exception:
+            pass
+
+
+@register_test(1, "T1_25_TERM_INVALID", "Invalid term flag returns exit code 1", ["FEAT-020"])
+def test_t1_25_term_invalid(ctx: TestContext):
+    code, out, err = run_client(ctx, ["127.0.0.1", "9999", "-a", "HELLO", "--term", "ZZ"])
+    assert code == 1, f"Expected exit code 1 for invalid term char, got {code}"
+    code2, out2, err2 = run_client(ctx, ["127.0.0.1", "9999", "-a", "HELLO", "--term", "1234"])
+    assert code2 == 1, f"Expected exit code 1 for multi-byte term char, got {code2}"
 
 
 @register_test(1, "T1_13", "Verbose logging flag (-v short flag)", ["FEAT-005"])
