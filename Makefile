@@ -24,7 +24,8 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/signal_handler.c \
        $(SRC_DIR)/hex_utils.c \
        $(SRC_DIR)/hsm_decoder.c \
-       $(SRC_DIR)/compat.c
+       $(SRC_DIR)/compat.c \
+       $(SRC_DIR)/linenoise.c
 
 OBJS = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 DEPS = $(OBJS:.o=.d)
