@@ -30,3 +30,42 @@ Công cụ cho phép kết nối tới TCP Server thông qua Host/IP và Port đ
 ### Build & Portability Verification
 - [ ] Chương trình có script/tệp hướng dẫn biên dịch hoặc build tự động ra binary thực thi trên Linux.
 - [ ] Kèm theo bộ test tự động (hoặc test script với mock TCP server) để xác minh toàn bộ tính năng hoạt động chính xác.
+
+## Follow-up — 2026-09-04T03:26:44Z
+
+This is a single self-contained fix; keep it small and focused.
+
+Khắc phục triệt để các lỗi regression trong bộ phân tích tham số dòng lệnh (CLI parser) của `tcp-client`, phục hồi đầy đủ tính năng của các cờ (`-h`, `-a`, `-T`, `-L`, `-D`), và tinh chỉnh tính tương thích trên Windows/Linux để vượt qua 100% các bài kiểm thử tự động.
+
+Working directory: d:/DEV/3DS/acs_kernel_ncudcntt/tcp-client-cli
+Integrity mode: development
+
+## Requirements
+
+### R1. Phục hồi toàn vẹn bộ phân tích CLI trong `src/cli_args.c`
+Khắc phục các khiếm khuyết trong logic phân tích tham số:
+- Khôi phục xử lý cờ máy chủ (`-h` / `--host`).
+- Tách biệt hoàn toàn xử lý chuỗi ASCII (`-a` / `--ascii`) và ký tự kết thúc (`-T` / `--term`), ngăn chặn lỗi nhận diện nhầm tham số.
+- Phục hồi việc nhận diện cờ tiền tố độ dài TCP 2-byte (`-L` / `--add-tcp-len`) và bộ giải mã HSM (`-D` / `--decode-hsm`).
+- Đồng bộ thông điệp trợ giúp (`print_usage`) và danh sách `long_options` để phản ánh đúng và đủ tất cả các tùy chọn CLI hiện có.
+
+### R2. Đảm bảo tính ổn định và tương thích đa nền tảng (Windows & POSIX)
+Xử lý các trường hợp đóng kết nối đột ngột, timeout tức thì (1ms) và quản lý stream I/O trên Windows để toàn bộ các kịch bản tương tác và one-shot đạt tính tất định cao nhất.
+
+## Verification Resources
+- Test suite tự động: `python tests/test_runner.py` (chứa 65 test cases đa tầng từ T1 đến T5).
+- Mã nguồn kiểm thử mock server: `tests/mock_server.py`.
+
+## Acceptance Criteria
+
+### CLI Parsing & Functional Behavior
+- [ ] Lệnh `./tcp-client -h 127.0.0.1 -p <port>` và `./tcp-client --host 127.0.0.1 --port <port>` kết nối thành công, không trả về mã lỗi 1.
+- [ ] Cờ `-a` hỗ trợ đầy đủ escape sequence (ví dụ: `\x19`, `\r\n`) mà không bị xung đột với `-T`.
+- [ ] Cờ `-T <hex>` nối đúng 1 byte vào cuối dữ liệu gửi và ngắt đọc ngay khi nhận delimiter từ server.
+- [ ] Cờ `-L` chèn đúng 2-byte Big-Endian length header vào trước payload.
+- [ ] Cờ `-D` kích hoạt đúng bộ giải mã HSM Thales payShield 10K.
+- [ ] Lệnh `./tcp-client --help` hiển thị đầy đủ thông tin về `-h`, `-p`, `-t`, `-x`, `-X`, `-a`, `-T`, `-L`, `-D`, `-i`, `-v`, `-H`, `-V`.
+
+### Automated Test Suite
+- [ ] Chạy `python tests/test_runner.py` vượt qua toàn bộ 65/65 test case (0 failure).
+

@@ -142,10 +142,12 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
 
     while (!signal_handler_is_interrupted() && !socket_eof) {
         if (stdin_eof && send_buf_len == 0 && !shutdown_done) {
-            if (config->verbose) {
-                fprintf(stderr, "[VERBOSE] STDIN EOF reached. Issuing shutdown(SHUT_WR)...\n");
+            if (!config->decode_hsm && !config->has_term_char) {
+                if (config->verbose) {
+                    fprintf(stderr, "[VERBOSE] STDIN EOF reached. Issuing shutdown(SHUT_WR)...\n");
+                }
+                shutdown(sockfd, SHUT_WR);
             }
-            shutdown(sockfd, SHUT_WR);
             shutdown_done = true;
         }
 
@@ -364,7 +366,9 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
     }
 
     if (stdin_eof && send_buf_len == 0 && !shutdown_done) {
-        shutdown(sockfd, SHUT_WR);
+        if (!config->decode_hsm && !config->has_term_char) {
+            shutdown(sockfd, SHUT_WR);
+        }
     }
 
     if (config->decode_hsm && hsm_accum_len > 0) {
