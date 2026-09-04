@@ -200,7 +200,12 @@ static int handle_interactive_command(linenoiseState *l, int sockfd, const cli_c
         linenoiseHistorySave(hist_path);
         print_interactive_history(hist_path);
     } else if (l->len > 0) {
-        ssize_t nsent = socket_write_all(sockfd, l->buf, l->len, config->timeout_ms);
+        char transmit_buf[INTERACTIVE_BUF_SIZE + 2];
+        size_t send_len = l->len;
+        if (send_len > INTERACTIVE_BUF_SIZE) send_len = INTERACTIVE_BUF_SIZE;
+        memcpy(transmit_buf, l->buf, send_len);
+        transmit_buf[send_len++] = '\n';
+        ssize_t nsent = socket_write_all(sockfd, transmit_buf, send_len, config->timeout_ms);
         if (nsent < 0) {
             fprintf(stderr, "Error: Failed to transmit data to server.\n");
             return -1; /* network error */
@@ -608,7 +613,7 @@ static int run_interactive_tty_mode(int sockfd, const cli_config_t *config) {
         fds[1].events = POLLIN;
         fds[1].revents = 0;
 
-        int poll_rc = poll_sockets(fds, 2, 20);
+        int poll_rc = poll_sockets(fds, 2, -1);
         if (poll_rc < 0) {
             if (get_last_socket_error() == EINTR) {
                 if (signal_handler_is_interrupted()) {
