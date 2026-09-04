@@ -13,7 +13,7 @@ import subprocess
 import hashlib
 from typing import Tuple
 
-BINARY_PATH = os.path.abspath("./tcp-client")
+BINARY_PATH = os.path.abspath("./tcp-client" if os.name != 'nt' else "./tcp-client.exe")
 MOCK_SERVER_SCRIPT = os.path.join(os.path.dirname(__file__), "mock_server.py")
 
 

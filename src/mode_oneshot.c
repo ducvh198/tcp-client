@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 #define ONESHOT_BUF_SIZE 65536
 
@@ -24,7 +25,7 @@ static ssize_t write_all_fd(int fd, const void *buf, size_t count) {
             ptr += w;
             left -= (size_t)w;
         } else if (w < 0) {
-            if (get_last_socket_error() == EINTR) continue;
+            if (errno == EINTR) continue;
             return -1;
         } else {
             return -1;
@@ -34,9 +35,21 @@ static ssize_t write_all_fd(int fd, const void *buf, size_t count) {
 }
 
 #ifdef _WIN32
+static uint64_t get_time_ms_hires(void) {
+    static LARGE_INTEGER freq;
+    static bool init = false;
+    if (!init) {
+        QueryPerformanceFrequency(&freq);
+        init = true;
+    }
+    LARGE_INTEGER counter;
+    QueryPerformanceCounter(&counter);
+    return (uint64_t)((counter.QuadPart * 1000) / freq.QuadPart);
+}
+
 static bool check_stdin_ready(void) {
     HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
-    if (hStdin == INVALID_HANDLE_VALUE) return false;
+    if (hStdin == INVALID_HANDLE_VALUE || hStdin == NULL) return false;
     DWORD mode;
     if (GetConsoleMode(hStdin, &mode)) {
         INPUT_RECORD ir[1];
@@ -47,10 +60,10 @@ static bool check_stdin_ready(void) {
         return false;
     } else {
         DWORD avail = 0;
-        if (PeekNamedPipe(hStdin, NULL, 0, NULL, &avail, NULL)) {
-            return avail > 0;
+        if (!PeekNamedPipe(hStdin, NULL, 0, NULL, &avail, NULL)) {
+            return true;
         }
-        return true;
+        return avail > 0;
     }
 }
 #endif
@@ -61,7 +74,7 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
     }
 
     int timeout_ms = config->timeout_ms;
-    if (timeout_ms <= 0) {
+    if (timeout_ms < 0) {
         timeout_ms = 5000;
     }
 
@@ -71,7 +84,7 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
 
     set_socket_nonblocking(sockfd);
 
-    char send_buf[ONESHOT_BUF_SIZE];
+    char send_buf[ONESHOT_BUF_SIZE + 512];
     size_t send_buf_len = 0;
     size_t send_buf_pos = 0;
     bool stdin_eof = false;
@@ -86,11 +99,17 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
             return 1;
         }
         if (config->has_term_char) {
+            if (config->add_tcp_len && hex_len >= 65535) {
+                hex_len = 65534;
+            }
             if (hex_len < sizeof(hex_bytes)) {
                 hex_bytes[hex_len++] = config->term_char;
             }
         }
         if (config->add_tcp_len) {
+            if (hex_len > 65535) {
+                hex_len = 65535;
+            }
             send_buf[0] = (char)((hex_len >> 8) & 0xFF);
             send_buf[1] = (char)(hex_len & 0xFF);
             memcpy(send_buf + 2, hex_bytes, hex_len);
@@ -113,11 +132,17 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
         }
         memcpy(ascii_bytes, config->ascii_payload, ascii_len);
         if (config->has_term_char) {
+            if (config->add_tcp_len && ascii_len >= 65535) {
+                ascii_len = 65534;
+            }
             if (ascii_len < sizeof(ascii_bytes)) {
                 ascii_bytes[ascii_len++] = config->term_char;
             }
         }
         if (config->add_tcp_len) {
+            if (ascii_len > 65535) {
+                ascii_len = 65535;
+            }
             send_buf[0] = (char)((ascii_len >> 8) & 0xFF);
             send_buf[1] = (char)(ascii_len & 0xFF);
             memcpy(send_buf + 2, ascii_bytes, ascii_len);
@@ -137,8 +162,12 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
     char recv_buf[ONESHOT_BUF_SIZE];
     bool socket_eof = false;
 
-    uint8_t hsm_accum_buf[ONESHOT_BUF_SIZE];
+    uint8_t hsm_accum_buf[ONESHOT_BUF_SIZE + 512];
     size_t hsm_accum_len = 0;
+
+#ifdef _WIN32
+    uint64_t last_activity = get_time_ms_hires();
+#endif
 
     while (!signal_handler_is_interrupted() && !socket_eof) {
         if (stdin_eof && send_buf_len == 0 && !shutdown_done) {
@@ -196,7 +225,20 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
         }
 
         /* Socket I/O */
-        if (sock_idx >= 0 && (fds[sock_idx].revents & (POLLIN | POLLHUP | POLLERR))) {
+        if (sock_idx >= 0 && (fds[sock_idx].revents & POLLERR)) {
+            return 5;
+        }
+
+        if (sock_idx >= 0 && (fds[sock_idx].revents & POLLHUP)) {
+            if (!(fds[sock_idx].revents & POLLIN)) {
+                if (send_buf_len > 0 || (!stdin_eof && !config->is_hex && !config->is_ascii)) {
+                    return 5;
+                }
+                socket_eof = true;
+            }
+        }
+
+        if (sock_idx >= 0 && (fds[sock_idx].revents & POLLIN)) {
             ssize_t nread = recv(sockfd, recv_buf, sizeof(recv_buf), 0);
             if (nread > 0) {
                 size_t to_process = (size_t)nread;
@@ -212,7 +254,7 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
                 }
 
                 if (config->decode_hsm) {
-                    if (hsm_accum_len + to_process < sizeof(hsm_accum_buf)) {
+                    if (hsm_accum_len + to_process <= sizeof(hsm_accum_buf)) {
                         memcpy(hsm_accum_buf + hsm_accum_len, recv_buf, to_process);
                         hsm_accum_len += to_process;
                         if (hsm_accum_len >= 2) {
@@ -222,16 +264,23 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
                                 socket_eof = true;
                             }
                         }
+                    } else {
+                        socket_eof = true;
                     }
                 } else if (config->hex_out) {
-                    char hex_out_buf[ONESHOT_BUF_SIZE * 3 + 2];
-                    if (bytes_to_hex((const uint8_t *)recv_buf, to_process, hex_out_buf, sizeof(hex_out_buf), true, true) == 0) {
-                        size_t hex_len = strlen(hex_out_buf);
-                        hex_out_buf[hex_len] = '\n';
-                        hex_out_buf[hex_len + 1] = '\0';
-                        if (write_all_fd(STDOUT_FILENO, hex_out_buf, hex_len + 1) < 0) {
-                            return 5;
+                    size_t hex_alloc = to_process * 3 + 2;
+                    char *hex_out_buf = malloc(hex_alloc);
+                    if (hex_out_buf) {
+                        if (bytes_to_hex((const uint8_t *)recv_buf, to_process, hex_out_buf, hex_alloc, true, true) == 0) {
+                            size_t hex_len = strlen(hex_out_buf);
+                            hex_out_buf[hex_len] = '\n';
+                            hex_out_buf[hex_len + 1] = '\0';
+                            if (write_all_fd(STDOUT_FILENO, hex_out_buf, hex_len + 1) < 0) {
+                                free(hex_out_buf);
+                                return 5;
+                            }
                         }
+                        free(hex_out_buf);
                     }
                 } else {
                     if (write_all_fd(STDOUT_FILENO, recv_buf, to_process) < 0) {
@@ -243,6 +292,10 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
                     socket_eof = true;
                 }
             } else if (nread == 0) {
+                if (send_buf_len > 0 || (!stdin_eof && !config->is_hex && !config->is_ascii)) {
+                    /* Server disconnected before client finished sending */
+                    return 5;
+                }
                 socket_eof = true;
             } else {
                 if (!is_socket_wouldblock(get_last_socket_error())) {
@@ -283,6 +336,17 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
         }
 #else
         /* Windows loop */
+        uint64_t now = get_time_ms_hires();
+        uint64_t elapsed = now - last_activity;
+        if (elapsed >= (uint64_t)timeout_ms) {
+            fprintf(stderr, "Error: Read timeout waiting for server response.\n");
+            return 4;
+        }
+
+        int slice = (int)((uint64_t)timeout_ms - elapsed);
+        if (slice > 50) slice = 50;
+        if (slice < 1) slice = 1;
+
         pollfd_t spfd;
         spfd.fd = sockfd;
         spfd.events = 0;
@@ -290,14 +354,37 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
         if (!socket_eof) spfd.events |= POLLIN;
         spfd.revents = 0;
 
-        int poll_rc = poll_sockets(&spfd, 1, 50);
+        int poll_rc = poll_sockets(&spfd, 1, slice);
         if (poll_rc < 0) {
+            int err = get_last_socket_error();
+            if (is_socket_wouldblock(err)) continue;
             return 5;
         }
 
-        if (spfd.revents & (POLLIN | POLLHUP | POLLERR)) {
+        if (poll_rc == 0) {
+            if (get_time_ms_hires() - last_activity >= (uint64_t)timeout_ms) {
+                fprintf(stderr, "Error: Read timeout waiting for server response.\n");
+                return 4;
+            }
+        }
+
+        if (spfd.revents & POLLERR) {
+            return 5;
+        }
+
+        if (spfd.revents & POLLHUP) {
+            if (!(spfd.revents & POLLIN)) {
+                if (send_buf_len > 0 || (!stdin_eof && !config->is_hex && !config->is_ascii)) {
+                    return 5;
+                }
+                socket_eof = true;
+            }
+        }
+
+        if (spfd.revents & POLLIN) {
             ssize_t nread = recv(sockfd, recv_buf, sizeof(recv_buf), 0);
             if (nread > 0) {
+                last_activity = get_time_ms_hires();
                 size_t to_process = (size_t)nread;
                 bool term_found = false;
                 if (config->has_term_char) {
@@ -311,7 +398,7 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
                 }
 
                 if (config->decode_hsm) {
-                    if (hsm_accum_len + to_process < sizeof(hsm_accum_buf)) {
+                    if (hsm_accum_len + to_process <= sizeof(hsm_accum_buf)) {
                         memcpy(hsm_accum_buf + hsm_accum_len, recv_buf, to_process);
                         hsm_accum_len += to_process;
                         if (hsm_accum_len >= 2) {
@@ -321,34 +408,60 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
                                 socket_eof = true;
                             }
                         }
+                    } else {
+                        socket_eof = true;
                     }
                 } else if (config->hex_out) {
-                    char hex_out_buf[ONESHOT_BUF_SIZE * 3 + 2];
-                    if (bytes_to_hex((const uint8_t *)recv_buf, to_process, hex_out_buf, sizeof(hex_out_buf), true, true) == 0) {
-                        size_t hex_len = strlen(hex_out_buf);
-                        hex_out_buf[hex_len] = '\n';
-                        hex_out_buf[hex_len + 1] = '\0';
-                        write_all_fd(STDOUT_FILENO, hex_out_buf, hex_len + 1);
+                    size_t hex_alloc = to_process * 3 + 2;
+                    char *hex_out_buf = malloc(hex_alloc);
+                    if (hex_out_buf) {
+                        if (bytes_to_hex((const uint8_t *)recv_buf, to_process, hex_out_buf, hex_alloc, true, true) == 0) {
+                            size_t hex_len = strlen(hex_out_buf);
+                            hex_out_buf[hex_len] = '\n';
+                            hex_out_buf[hex_len + 1] = '\0';
+                            if (write_all_fd(STDOUT_FILENO, hex_out_buf, hex_len + 1) < 0) {
+                                free(hex_out_buf);
+                                return 5;
+                            }
+                        }
+                        free(hex_out_buf);
                     }
                 } else {
-                    write_all_fd(STDOUT_FILENO, recv_buf, to_process);
+                    if (write_all_fd(STDOUT_FILENO, recv_buf, to_process) < 0) {
+                        return 5;
+                    }
                 }
 
                 if (term_found) {
                     socket_eof = true;
                 }
             } else if (nread == 0) {
+                if (send_buf_len > 0 || (!stdin_eof && !config->is_hex && !config->is_ascii)) {
+                    /* Server disconnected before client finished sending */
+                    return 5;
+                }
                 socket_eof = true;
+            } else {
+                int err = get_last_socket_error();
+                if (!is_socket_wouldblock(err)) {
+                    return 5;
+                }
             }
         }
 
         if ((spfd.revents & POLLOUT) && send_buf_len > 0) {
             ssize_t nsent = send(sockfd, send_buf + send_buf_pos, (int)(send_buf_len - send_buf_pos), MSG_NOSIGNAL);
             if (nsent > 0) {
+                last_activity = get_time_ms_hires();
                 send_buf_pos += (size_t)nsent;
                 if (send_buf_pos >= send_buf_len) {
                     send_buf_len = 0;
                     send_buf_pos = 0;
+                }
+            } else if (nsent < 0) {
+                int err = get_last_socket_error();
+                if (!is_socket_wouldblock(err)) {
+                    return 5;
                 }
             }
         }
@@ -356,9 +469,12 @@ int run_oneshot_mode(int sockfd, const cli_config_t *config) {
         if (!stdin_eof && send_buf_len == 0 && check_stdin_ready()) {
             int nread = _read(STDIN_FILENO, send_buf, sizeof(send_buf));
             if (nread > 0) {
+                last_activity = get_time_ms_hires();
                 send_buf_len = (size_t)nread;
                 send_buf_pos = 0;
             } else if (nread == 0) {
+                stdin_eof = true;
+            } else {
                 stdin_eof = true;
             }
         }

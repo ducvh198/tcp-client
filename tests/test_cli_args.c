@@ -263,6 +263,80 @@ void test_unrecognized_option(void) {
     ASSERT_EQ_INT(1, rc);
 }
 
+void test_cli_ascii_and_term_separation(void) {
+    char *argv[] = {"tcp-client", "-h", "127.0.0.1", "-p", "8080", "-a", "NC0000", "-T", "19"};
+    int argc = 9;
+    cli_config_t config;
+    int rc = parse_cli_args(argc, argv, &config);
+    ASSERT_EQ_INT(0, rc);
+    ASSERT_TRUE(config.is_ascii);
+    ASSERT_EQ_INT(6, (int)config.ascii_payload_len);
+    ASSERT_EQ_INT(0, memcmp(config.ascii_payload, "NC0000", 6));
+    ASSERT_TRUE(config.has_term_char);
+    ASSERT_EQ_INT(0x19, (int)config.term_char);
+}
+
+void test_cli_ascii_escape_sequences(void) {
+    char *argv[] = {"tcp-client", "-h", "127.0.0.1", "-p", "8080", "--ascii", "NC0000\\x19\\r\\n"};
+    int argc = 7;
+    cli_config_t config;
+    int rc = parse_cli_args(argc, argv, &config);
+    ASSERT_EQ_INT(0, rc);
+    ASSERT_TRUE(config.is_ascii);
+    ASSERT_EQ_INT(9, (int)config.ascii_payload_len);
+    ASSERT_EQ_INT(0, memcmp(config.ascii_payload, "NC0000\x19\r\n", 9));
+}
+
+void test_cli_term_byte_variants(void) {
+    cli_config_t config;
+    char *argv1[] = {"tcp-client", "-h", "127.0.0.1", "-p", "8080", "-T", "0x0A"};
+    ASSERT_EQ_INT(0, parse_cli_args(7, argv1, &config));
+    ASSERT_TRUE(config.has_term_char);
+    ASSERT_EQ_INT(0x0A, (int)config.term_char);
+
+    char *argv2[] = {"tcp-client", "-h", "127.0.0.1", "-p", "8080", "-T", "ZZ"};
+    ASSERT_EQ_INT(1, parse_cli_args(7, argv2, &config));
+
+    char *argv3[] = {"tcp-client", "-h", "127.0.0.1", "-p", "8080", "-T", "1234"};
+    ASSERT_EQ_INT(1, parse_cli_args(7, argv3, &config));
+}
+
+void test_cli_add_tcp_len(void) {
+    char *argv[] = {"tcp-client", "-h", "127.0.0.1", "-p", "8080", "-a", "TEST", "-L"};
+    int argc = 8;
+    cli_config_t config;
+    int rc = parse_cli_args(argc, argv, &config);
+    ASSERT_EQ_INT(0, rc);
+    ASSERT_TRUE(config.add_tcp_len);
+}
+
+void test_cli_decode_hsm_and_header_len(void) {
+    char *argv[] = {"tcp-client", "-h", "127.0.0.1", "-p", "8080", "-D", "--hsm-header-len", "8"};
+    int argc = 8;
+    cli_config_t config;
+    int rc = parse_cli_args(argc, argv, &config);
+    ASSERT_EQ_INT(0, rc);
+    ASSERT_TRUE(config.decode_hsm);
+    ASSERT_EQ_INT(8, config.hsm_header_len);
+
+    char *argv_bad[] = {"tcp-client", "-h", "127.0.0.1", "-p", "8080", "--hsm-header-len", "100"};
+    ASSERT_EQ_INT(1, parse_cli_args(7, argv_bad, &config));
+}
+
+void test_cli_hex_payload_and_hex_out(void) {
+    char *argv[] = {"tcp-client", "-h", "127.0.0.1", "-p", "8080", "-x", "00 06 30 30", "-X"};
+    int argc = 8;
+    cli_config_t config;
+    int rc = parse_cli_args(argc, argv, &config);
+    ASSERT_EQ_INT(0, rc);
+    ASSERT_TRUE(config.is_hex);
+    ASSERT_TRUE(config.hex_out);
+    ASSERT_STREQ("00 06 30 30", config.hex_payload);
+
+    char *argv_bad[] = {"tcp-client", "-h", "127.0.0.1", "-p", "8080", "-x", "INVALID_HEX"};
+    ASSERT_EQ_INT(1, parse_cli_args(7, argv_bad, &config));
+}
+
 void run_cli_args_tests(void) {
     RUN_TEST(test_parse_positional_args);
     RUN_TEST(test_parse_flags_short);
@@ -290,4 +364,10 @@ void run_cli_args_tests(void) {
     RUN_TEST(test_boundary_timeout_overflow);
     RUN_TEST(test_mixed_flags_and_positionals);
     RUN_TEST(test_unrecognized_option);
+    RUN_TEST(test_cli_ascii_and_term_separation);
+    RUN_TEST(test_cli_ascii_escape_sequences);
+    RUN_TEST(test_cli_term_byte_variants);
+    RUN_TEST(test_cli_add_tcp_len);
+    RUN_TEST(test_cli_decode_hsm_and_header_len);
+    RUN_TEST(test_cli_hex_payload_and_hex_out);
 }

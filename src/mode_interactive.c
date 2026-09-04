@@ -46,7 +46,7 @@ static bool is_exit_command(const char *buf) {
 #ifdef _WIN32
 static bool check_stdin_ready(void) {
     HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
-    if (hStdin == INVALID_HANDLE_VALUE) return false;
+    if (hStdin == INVALID_HANDLE_VALUE || hStdin == NULL) return false;
     DWORD mode;
     if (GetConsoleMode(hStdin, &mode)) {
         INPUT_RECORD ir[1];
@@ -57,10 +57,10 @@ static bool check_stdin_ready(void) {
         return false;
     } else {
         DWORD avail = 0;
-        if (PeekNamedPipe(hStdin, NULL, 0, NULL, &avail, NULL)) {
-            return avail > 0;
+        if (!PeekNamedPipe(hStdin, NULL, 0, NULL, &avail, NULL)) {
+            return true;
         }
-        return true;
+        return avail > 0;
     }
 }
 #endif
@@ -97,7 +97,6 @@ int run_interactive_mode(int sockfd, const cli_config_t *config) {
 
         if (!stdin_eof) {
             stdin_idx = nfds;
-            fds[nfds].fd = sockfd;
             fds[nfds].fd = STDIN_FILENO;
             fds[nfds].events = POLLIN;
             fds[nfds].revents = 0;
@@ -240,7 +239,30 @@ int run_interactive_mode(int sockfd, const cli_config_t *config) {
         spfd.events = POLLIN;
         spfd.revents = 0;
 
-        int poll_rc = poll_sockets(&spfd, 1, 50);
+        int poll_timeout = stdin_eof ? 200 : 50;
+        int poll_rc = poll_sockets(&spfd, 1, poll_timeout);
+        if (poll_rc < 0) {
+            int err = get_last_socket_error();
+            if (is_socket_wouldblock(err)) continue;
+            free(line_buf);
+            return 5;
+        }
+
+        if (poll_rc == 0 && stdin_eof) {
+            free(line_buf);
+            return 0;
+        }
+
+        if (poll_rc > 0 && (spfd.revents & (POLLHUP | POLLERR))) {
+            if (!(spfd.revents & POLLIN)) {
+                if (config->verbose) {
+                    fprintf(stderr, "[VERBOSE] Server hangup / error event detected.\n");
+                }
+                free(line_buf);
+                return 0;
+            }
+        }
+
         if (poll_rc > 0 && (spfd.revents & POLLIN)) {
             ssize_t nread = socket_read(sockfd, sock_buf, sizeof(sock_buf), config->timeout_ms);
             if (nread > 0) {
@@ -256,22 +278,49 @@ int run_interactive_mode(int sockfd, const cli_config_t *config) {
                 }
                 free(line_buf);
                 return 0;
+            } else {
+                if (nread != SOCKET_ERR_TIMEOUT) {
+                    fprintf(stderr, "Error: Socket read failed or connection lost.\n");
+                    free(line_buf);
+                    return 5;
+                }
             }
         }
 
         if (!stdin_eof && check_stdin_ready()) {
             int nread = _read(STDIN_FILENO, raw_stdin, sizeof(raw_stdin));
-            if (nread == 0) {
+            if (nread <= 0) {
                 if (config->verbose) {
                     fprintf(stderr, "[VERBOSE] STDIN EOF detected.\n");
                 }
                 stdin_eof = true;
-                if (exit_requested) break;
-            } else if (nread > 0) {
+                if (line_len > 0) {
+                    if (line_len + 1 > line_cap) {
+                        size_t new_cap = line_len + 1;
+                        char *nb = realloc(line_buf, new_cap);
+                        if (nb) { line_buf = nb; line_cap = new_cap; }
+                    }
+                    if (line_buf) {
+                        line_buf[line_len] = '\0';
+                        if (is_exit_command(line_buf)) {
+                            exit_requested = true;
+                        } else {
+                            socket_write_all(sockfd, line_buf, line_len, config->timeout_ms);
+                            line_len = 0;
+                        }
+                    }
+                }
+                if (exit_requested) {
+                    break;
+                }
+            } else {
                 for (int i = 0; i < nread; i++) {
                     char c = raw_stdin[i];
                     if (line_len + 2 > line_cap) {
                         size_t new_cap = (line_cap == 0) ? 4096 : line_cap * 2;
+                        if (new_cap < line_len + 2) {
+                            new_cap = line_len + 2;
+                        }
                         char *new_buf = realloc(line_buf, new_cap);
                         if (!new_buf) {
                             free(line_buf);

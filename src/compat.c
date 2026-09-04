@@ -2,6 +2,9 @@
 #include <stdio.h>
 
 #ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+
 int platform_init(void) {
     WSADATA wsa;
     int res = WSAStartup(MAKEWORD(2, 2), &wsa);
@@ -9,6 +12,8 @@ int platform_init(void) {
         fprintf(stderr, "Error: WSAStartup failed with code %d\n", res);
         return -1;
     }
+    _setmode(_fileno(stdin), _O_BINARY);
+    _setmode(_fileno(stdout), _O_BINARY);
     return 0;
 }
 

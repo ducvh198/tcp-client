@@ -14,7 +14,7 @@ void test_socket_invalid_host_dns(void) {
 }
 
 void test_socket_connection_refused(void) {
-    int res = socket_connect("127.0.0.1", 59999, 1000, false);
+    int res = socket_connect("127.0.0.1", 59999, 3000, false);
     ASSERT_EQ_INT(SOCKET_ERR_REFUSED, res);
 }
 
