@@ -18,6 +18,75 @@
 
 #define INTERACTIVE_BUF_SIZE 65536
 
+static const char * const INTERACTIVE_COMPLETIONS[] = {
+    /* Built-in Control Commands */
+    "exit",
+    "quit",
+    "help",
+    "clear",
+    "status",
+    "history",
+    /* Sample HSM & Payment Commands */
+    "NC0000",
+    "00 06 30 30 30 30",
+    "BA",
+    "BB",
+    "CA",
+    "CB",
+    "M0",
+    "M2"
+};
+
+#define INTERACTIVE_COMPLETIONS_COUNT \
+    (sizeof(INTERACTIVE_COMPLETIONS) / sizeof(INTERACTIVE_COMPLETIONS[0]))
+
+void interactive_completion_callback(const char *buf, linenoiseCompletions *lc) {
+    if (!lc) {
+        return;
+    }
+
+    const char *prefix = buf ? buf : "";
+    size_t prefix_len = strlen(prefix);
+
+    for (size_t i = 0; i < INTERACTIVE_COMPLETIONS_COUNT; i++) {
+        const char *cmd = INTERACTIVE_COMPLETIONS[i];
+        if (prefix_len == 0 || strncmp(cmd, prefix, prefix_len) == 0) {
+            linenoiseAddCompletion(lc, cmd);
+        }
+    }
+}
+
+char *get_interactive_history_path(char *out_path, size_t max_len) {
+    if (!out_path || max_len == 0) {
+        return NULL;
+    }
+
+#ifdef _WIN32
+    const char *userprofile = getenv("USERPROFILE");
+    if (userprofile && userprofile[0] != '\0') {
+        snprintf(out_path, max_len, "%s\\.tcp_client_history", userprofile);
+    } else {
+        const char *homedrive = getenv("HOMEDRIVE");
+        const char *homepath = getenv("HOMEPATH");
+        if (homedrive && homedrive[0] != '\0' && homepath && homepath[0] != '\0') {
+            snprintf(out_path, max_len, "%s%s\\.tcp_client_history", homedrive, homepath);
+        } else {
+            snprintf(out_path, max_len, "./.tcp_client_history");
+        }
+    }
+#else
+    const char *home = getenv("HOME");
+    if (home && home[0] != '\0') {
+        snprintf(out_path, max_len, "%s/.tcp_client_history", home);
+    } else {
+        snprintf(out_path, max_len, "./.tcp_client_history");
+    }
+#endif
+
+    out_path[max_len - 1] = '\0';
+    return out_path;
+}
+
 static bool is_exit_command(const char *buf) {
     if (!buf) {
         return false;

@@ -2,6 +2,29 @@
 #define MODE_INTERACTIVE_H
 
 #include "cli_args.h"
+#include "linenoise.h"
+
+/**
+ * Tab completion callback for Linenoise interactive terminal.
+ * Completes built-in control commands and sample HSM/payment commands.
+ *
+ * @param buf Current input buffer string being typed.
+ * @param lc Pointer to linenoiseCompletions struct where matches are added.
+ */
+void interactive_completion_callback(const char *buf, linenoiseCompletions *lc);
+
+/**
+ * Resolves the path to the persistent interactive history file.
+ *
+ * Windows: %USERPROFILE%\.tcp_client_history or %HOMEDRIVE%%HOMEPATH%\.tcp_client_history
+ * POSIX:   $HOME/.tcp_client_history
+ * Fallback: ./.tcp_client_history
+ *
+ * @param out_path Destination buffer to receive the resolved path.
+ * @param max_len Maximum length of out_path buffer.
+ * @return out_path pointer (or NULL if out_path is NULL or max_len is 0).
+ */
+char *get_interactive_history_path(char *out_path, size_t max_len);
 
 /**
  * Runs interactive terminal mode using POSIX poll() multiplexing.

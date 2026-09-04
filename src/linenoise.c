@@ -334,6 +334,7 @@ void linenoiseEditStop(linenoiseState *l) {
 
 int linenoiseEditFeed(linenoiseState *l, int c) {
     if (!l || !l->buf || l->buflen == 0) return 0;
+    if (c == -1) return -1;
 
     if (esc_state == ESC_STATE_ESC) {
         if (c == '[') {
@@ -422,14 +423,17 @@ int linenoiseEditFeed(linenoiseState *l, int c) {
             l->in_completion = 0;
             l->completion_idx = 0;
             linenoiseFreeCompletions(&cached_completions);
-            linenoiseEditRedraw(l);
-            return 0;
         }
         esc_state = ESC_STATE_ESC;
         return 0;
     }
 
     if (c == 0 || (unsigned char)c == 0xE0) {
+        if (l->in_completion) {
+            l->in_completion = 0;
+            l->completion_idx = 0;
+            linenoiseFreeCompletions(&cached_completions);
+        }
         esc_state = ESC_STATE_WIN_EXT;
         return 0;
     }
