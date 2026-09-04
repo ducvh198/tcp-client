@@ -582,6 +582,7 @@ static int run_interactive_tty_mode(int sockfd, const cli_config_t *config) {
     linenoiseSetCompletionCallback(interactive_completion_callback);
 
     if (linenoiseEnableRawMode(STDIN_FILENO) == -1) {
+        linenoiseHistoryFree();
         return run_interactive_pipe_mode(sockfd, config);
     }
 
@@ -594,6 +595,7 @@ static int run_interactive_tty_mode(int sockfd, const cli_config_t *config) {
     linenoiseEditStart(&l, edit_buf, sizeof(edit_buf), "> ");
 
     char sock_buf[INTERACTIVE_BUF_SIZE];
+    int exit_status = 0;
 
     while (!signal_handler_is_interrupted()) {
 #ifndef _WIN32
@@ -615,10 +617,8 @@ static int run_interactive_tty_mode(int sockfd, const cli_config_t *config) {
                 continue;
             }
             fprintf(stderr, "Error: poll() system call failed\n");
-            linenoiseEditStop(&l);
-            linenoiseDisableRawMode(STDIN_FILENO);
-            linenoiseHistorySave(hist_path);
-            return 5;
+            exit_status = 5;
+            goto cleanup;
         }
 
         /* Check socket disconnect / hangup first */
@@ -627,10 +627,8 @@ static int run_interactive_tty_mode(int sockfd, const cli_config_t *config) {
                 if (config->verbose) {
                     fprintf(stderr, "[VERBOSE] Server hangup / error event detected.\n");
                 }
-                linenoiseEditStop(&l);
-                linenoiseDisableRawMode(STDIN_FILENO);
-                linenoiseHistorySave(hist_path);
-                return 0;
+                exit_status = 0;
+                goto cleanup;
             }
         }
 
@@ -638,15 +636,11 @@ static int run_interactive_tty_mode(int sockfd, const cli_config_t *config) {
         if (fds[0].revents & POLLIN) {
             int s_rc = handle_socket_data(sockfd, config, sock_buf, sizeof(sock_buf), &l);
             if (s_rc == 1) {
-                linenoiseEditStop(&l);
-                linenoiseDisableRawMode(STDIN_FILENO);
-                linenoiseHistorySave(hist_path);
-                return 0;
+                exit_status = 0;
+                goto cleanup;
             } else if (s_rc == -1) {
-                linenoiseEditStop(&l);
-                linenoiseDisableRawMode(STDIN_FILENO);
-                linenoiseHistorySave(hist_path);
-                return 5;
+                exit_status = 5;
+                goto cleanup;
             }
         }
 
@@ -658,10 +652,8 @@ static int run_interactive_tty_mode(int sockfd, const cli_config_t *config) {
                 if (config->verbose) {
                     fprintf(stderr, "[VERBOSE] STDIN EOF detected.\n");
                 }
-                linenoiseEditStop(&l);
-                linenoiseDisableRawMode(STDIN_FILENO);
-                linenoiseHistorySave(hist_path);
-                return 0;
+                exit_status = 0;
+                goto cleanup;
             }
 
             int c = (unsigned char)ch;
@@ -685,24 +677,18 @@ static int run_interactive_tty_mode(int sockfd, const cli_config_t *config) {
 
             if (feed_rc == -1) {
                 /* Ctrl+C or Ctrl+D on empty line */
-                linenoiseEditStop(&l);
-                linenoiseDisableRawMode(STDIN_FILENO);
-                linenoiseHistorySave(hist_path);
-                return 0;
+                exit_status = 0;
+                goto cleanup;
             }
 
             if (feed_rc == 1) {
                 int cmd_rc = handle_interactive_command(&l, sockfd, config, hist_path);
                 if (cmd_rc == 1) {
-                    linenoiseEditStop(&l);
-                    linenoiseDisableRawMode(STDIN_FILENO);
-                    linenoiseHistorySave(hist_path);
-                    return 0;
+                    exit_status = 0;
+                    goto cleanup;
                 } else if (cmd_rc == -1) {
-                    linenoiseEditStop(&l);
-                    linenoiseDisableRawMode(STDIN_FILENO);
-                    linenoiseHistorySave(hist_path);
-                    return 5;
+                    exit_status = 5;
+                    goto cleanup;
                 }
                 linenoiseEditStart(&l, edit_buf, sizeof(edit_buf), "> ");
             }
@@ -719,10 +705,8 @@ static int run_interactive_tty_mode(int sockfd, const cli_config_t *config) {
             int err = get_last_socket_error();
             if (!is_socket_wouldblock(err)) {
                 fprintf(stderr, "Error: WSAPoll failed\n");
-                linenoiseEditStop(&l);
-                linenoiseDisableRawMode(STDIN_FILENO);
-                linenoiseHistorySave(hist_path);
-                return 5;
+                exit_status = 5;
+                goto cleanup;
             }
         }
 
@@ -731,25 +715,19 @@ static int run_interactive_tty_mode(int sockfd, const cli_config_t *config) {
                 if (config->verbose) {
                     fprintf(stderr, "[VERBOSE] Server hangup / error event detected.\n");
                 }
-                linenoiseEditStop(&l);
-                linenoiseDisableRawMode(STDIN_FILENO);
-                linenoiseHistorySave(hist_path);
-                return 0;
+                exit_status = 0;
+                goto cleanup;
             }
         }
 
         if (poll_rc > 0 && (spfd.revents & POLLIN)) {
             int s_rc = handle_socket_data(sockfd, config, sock_buf, sizeof(sock_buf), &l);
             if (s_rc == 1) {
-                linenoiseEditStop(&l);
-                linenoiseDisableRawMode(STDIN_FILENO);
-                linenoiseHistorySave(hist_path);
-                return 0;
+                exit_status = 0;
+                goto cleanup;
             } else if (s_rc == -1) {
-                linenoiseEditStop(&l);
-                linenoiseDisableRawMode(STDIN_FILENO);
-                linenoiseHistorySave(hist_path);
-                return 5;
+                exit_status = 5;
+                goto cleanup;
             }
         }
 
@@ -759,24 +737,18 @@ static int run_interactive_tty_mode(int sockfd, const cli_config_t *config) {
 
             if (feed_rc == -1) {
                 /* Ctrl+C or Ctrl+D on empty line */
-                linenoiseEditStop(&l);
-                linenoiseDisableRawMode(STDIN_FILENO);
-                linenoiseHistorySave(hist_path);
-                return 0;
+                exit_status = 0;
+                goto cleanup;
             }
 
             if (feed_rc == 1) {
                 int cmd_rc = handle_interactive_command(&l, sockfd, config, hist_path);
                 if (cmd_rc == 1) {
-                    linenoiseEditStop(&l);
-                    linenoiseDisableRawMode(STDIN_FILENO);
-                    linenoiseHistorySave(hist_path);
-                    return 0;
+                    exit_status = 0;
+                    goto cleanup;
                 } else if (cmd_rc == -1) {
-                    linenoiseEditStop(&l);
-                    linenoiseDisableRawMode(STDIN_FILENO);
-                    linenoiseHistorySave(hist_path);
-                    return 5;
+                    exit_status = 5;
+                    goto cleanup;
                 }
                 linenoiseEditStart(&l, edit_buf, sizeof(edit_buf), "> ");
                 break;
@@ -785,10 +757,12 @@ static int run_interactive_tty_mode(int sockfd, const cli_config_t *config) {
 #endif
     }
 
+cleanup:
     linenoiseEditStop(&l);
     linenoiseDisableRawMode(STDIN_FILENO);
     linenoiseHistorySave(hist_path);
-    return 0;
+    linenoiseHistoryFree();
+    return exit_status;
 }
 
 int run_interactive_mode(int sockfd, const cli_config_t *config) {
